@@ -1,0 +1,760 @@
+---
+title: "NYT Transportation, Topic Modeling"
+author: "Sofia Sarak"
+output: html_document
+---
+
+The following document contains code to perform topic modeling on New York Times (NYT) articles regarding transportation. Data was accessed using the NYT API. This analysis was conducted to answer the question: **Has reporting on transportation in NYC changed over time? If so, how?**
+
+Potential reasons for temporal patterns can include politics, climate change, or the COVID-19 pandemic.
+
+This analysis follows the following steps:
+
+-   Step 1: Setup and data retrieval
+
+-   Step 2: Query by year
+
+-   Step 3: Model by year
+
+And closes with a brief conclusion.
+
+## Step 1: Setup and data retrieval
+
+```{r}
+#| message: false
+# load necessary libraries
+library(jsonlite) #convert results from API queries into R-friendly formats 
+library(tidyverse)
+library(tidytext) #text data management and analysis
+library(ggplot2) #plot word frequencies and publication dates
+library(quanteda)
+library(tm)
+library(topicmodels)
+library(topicdoc)   
+library(tidyverse)
+library(tidytext)
+library(reshape2)
+library(tictoc)
+library(LDAvis)
+library(tsne)
+library(servr)
+library(here)
+```
+
+```{r API-key, include=FALSE}
+#assign API key.  When you create a NYT Dev account, you will be given a key
+API_KEY <- "58yNxI94EKPuxLecuLRQOG0ho5mHc9lQ2G9Xod7AA7nirYmp"
+```
+
+For more information the New York Times API, see: <https://developer.nytimes.com/>
+
+In order to query the NYT API, I adapted the function we used in [Lab 1](https://github.com/MaRo406/EDS-231-text-sentiment/blob/main/Labs/Lab1.Rmd) of [EDS231: Text and Sentiment Analysis](https://maro406.github.io/EDS-231-text-sentiment/index.html). My adaptations include adding a `Sys.sleep(5)` command and switching the number of pages from 10 to 5. 
+
+This function utilizes `fromJSON()` from `{jsonlite}` to send the request to the NYT API and parse the JSON response into an R object. The `flatten = TRUE` argument converts the nested JSON structure into a flat data frame that is easier to work with in R.
+
+```{r}
+# create function that takes the term you are searching for, dates, and api key
+nytAPI = function(term1, begin_date, end_date, api) {
+  
+  # specify query inputs
+  searchQ = URLencode(term1) # term you are querying for
+  
+  url = paste0('https://api.nytimes.com/svc/search/v2/articlesearch.json?q=', searchQ, # url
+               '&begin_date=', begin_date, '&end_date=', end_date, '&api-key=', api)
+  
+  # we create an initial search to find out how many total hits, or articles that meet our query parameters
+  initialsearch = fromJSON(url, flatten = TRUE) 
+  
+  # access number of hits
+  hits = initialsearch$response$meta$hits
+  
+  ##if there are no hits, return an empty data frame
+  if (hits == 0) return(data.frame()) 
+  
+  #otherwise, we find out how many times we'll need to loop through the function, each time returning 5 pages (the max)
+  maxPages = min(round(hits / 5) - 1, 5) 
+  
+  # create empty dataframe for information
+  df = data.frame(id=as.numeric(), created_time=character(),
+                  snippet=character(), headline=character())
+  
+  # fill dataframe using for loop
+  for (i in 0:maxPages) {
+    nytSearch = fromJSON(paste0(url, "&page=", i), flatten = TRUE)
+    
+    if (is.null(nytSearch$response$docs) || nrow(nytSearch$response$docs) == 0) next
+    
+    Sys.sleep(12) 
+    
+    temp = data.frame(id = 1:nrow(nytSearch$response$docs),
+                  created_time = nytSearch$response$docs$pub_date,
+                  snippet = nytSearch$response$docs$snippet,
+                  headline = nytSearch$response$docs$headline.main)
+    df = rbind(df, temp)
+    
+    # need to add space between queries, because if you do too many too fast it will stop! 
+    Sys.sleep(12)
+  }
+  return(df)
+}
+```
+
+## Step 2: Query by year
+
+```{r}
+# save terms to query for
+term <- c("subway", "train", "bus", "MTA", "LIRR", "transportation", "transit")
+```
+
+### 2020
+
+```{r}
+# use for loop and query function to retrieve transportation articles from 2020
+#for (i in 1:length(term)){
+  
+  # retrieve articles by query term
+  #results = nytAPI(term1 = term[i], begin_date = "20200101", end_date = "20201231", api = API_KEY)
+  
+  # write csv file and save in data folder (naming after term)
+  #write.csv(results, paste0("NYT-", term[i],"2020.csv"))
+  
+  # protects againts system crash/NYT API error due to too much querying
+  #Sys.sleep(0.5)
+#}
+```
+
+```{r}
+#| message: false
+# read in data
+bus <- read_csv(here("data", "2020", "NYT-bus2020.csv"))
+lirr <- read_csv(here("data", "2020", "NYT-LIRR2020.csv"))
+mta <- read_csv(here("data", "2020", "NYT-MTA2020.csv"))
+subway <- read_csv(here("data", "2020", "NYT-subway2020.csv"))
+train <- read_csv(here("data", "2020", "NYT-train2020.csv"))
+transit <- read_csv(here("data", "2020", "NYT-transit2020.csv"))
+transport <- read_csv(here("data", "2020", "NYT-transportation2020.csv"))
+```
+
+```{r}
+# save as one df
+nyt_2020 <- rbind(bus, lirr, mta, subway, train, transit, transport)
+
+# remove completely identical rows
+nyt_2020 <- nyt_2020 %>% distinct()
+
+# create corpus for 2020
+corpus_2020 <- corpus(nyt_2020, text_field = "snippet")
+```
+
+### 2021
+
+```{r}
+# # same for loop as for 2020
+# for (i in 1:length(term)){
+#   results = nytAPI(term1 = term[i], begin_date = "20210101", end_date = "20211231", api = API_KEY)
+#   write.csv(results, paste0("NYT-", term[i],"2021.csv"))
+#   Sys.sleep(0.5)
+# }
+```
+
+```{r}
+#| message: false
+# read in data
+bus <- read_csv(here("data", "2021", "NYT-bus2021.csv"))
+lirr <- read_csv(here("data", "2021", "NYT-LIRR2021.csv"))
+mta <- read_csv(here("data", "2021", "NYT-MTA2021.csv"))
+subway <- read_csv(here("data", "2021", "NYT-subway2021.csv"))
+train <- read_csv(here("data", "2021", "NYT-train2021.csv"))
+transit <- read_csv(here("data", "2021", "NYT-transit2021.csv"))
+transport <- read_csv(here("data", "2021", "NYT-transportation2021.csv"))
+```
+
+```{r}
+# save as one df
+nyt_2021 <- rbind(bus, lirr, mta, subway, train, transit, transport)
+
+# remove completely identical rows
+nyt_2021 <- nyt_2021 %>% distinct()
+
+# create corpus for 2021
+corpus_2021 <- corpus(nyt_2021, text_field = "snippet")
+```
+
+### 2022
+
+```{r}
+# # same for loop as for 2020
+# for (i in 1:length(term)){
+#   results = nytAPI(term1 = term[i], begin_date = "20220101", end_date = "20221231", api = API_KEY)
+#   write.csv(results, paste0("NYT-", term[i],"2022.csv"))
+#   Sys.sleep(0.5)
+# }
+```
+
+```{r}
+#| message: false
+# read in data
+bus <- read_csv(here("data", "2022", "NYT-bus2022.csv"))
+lirr <- read_csv(here("data","2022", "NYT-LIRR2022.csv"))
+mta <- read_csv(here("data", "2022","NYT-MTA2022.csv"))
+subway <- read_csv(here("data","2022", "NYT-subway2022.csv"))
+train <- read_csv(here("data", "2022","NYT-train2022.csv"))
+transit <- read_csv(here("data", "2022","NYT-transit2022.csv"))
+transport <- read_csv(here("data", "2022","NYT-transportation2022.csv"))
+```
+
+```{r}
+# save as one df
+nyt_2022 <- rbind(bus, lirr, mta, subway, train, transit, transport)
+
+# remove completely identical rows
+nyt_2022 <- nyt_2022 %>% distinct()
+
+# create corpus for 2022
+corpus_2022 <- corpus(nyt_2022, text_field = "snippet")
+```
+
+### 2023
+
+```{r}
+# same for loop as for 2020
+for (i in 1:length(term)){
+  results = nytAPI(term1 = term[i], begin_date = "20230101", end_date = "20231231", api = API_KEY)
+  write.csv(results, paste0("NYT-", term[i],"2023.csv"))
+  Sys.sleep(0.5)
+}
+```
+
+```{r}
+#| message: false
+# read in data
+bus <- read_csv(here("data", "2023", "NYT-bus2023.csv"))
+lirr <- read_csv(here("data", "2023", "NYT-LIRR2023.csv"))
+mta <- read_csv(here("data", "2023", "NYT-MTA2023.csv"))
+subway <- read_csv(here("data", "2023", "NYT-subway2023.csv"))
+train <- read_csv(here("data", "2023", "NYT-train2023.csv"))
+transit <- read_csv(here("data", "2023", "NYT-transit2023.csv"))
+transport <- read_csv(here("data", "2023", "NYT-transportation2023.csv"))
+```
+
+```{r}
+# save as one df
+nyt_2023 <- rbind(bus, lirr, mta, subway, train, transit, transport)
+
+# remove completely identical rows
+nyt_2023 <- nyt_2023 %>% distinct()
+
+# create corpus for 2023
+corpus_2023 <- corpus(nyt_2023, text_field = "snippet")
+```
+
+
+### 2024
+
+```{r}
+# same for loop as for 2020
+for (i in 1:length(term)){
+  results = nytAPI(term1 = term[i], begin_date = "20240101", end_date = "20241231", api = API_KEY)
+  write.csv(results, paste0("NYT-", term[i],"2024.csv"))
+  Sys.sleep(0.5)
+}
+```
+
+```{r}
+#| message: false
+# read in data
+bus <- read_csv(here("data", "2024", "NYT-bus2024.csv"))
+lirr <- read_csv(here("data", "2024", "NYT-LIRR2024.csv"))
+mta <- read_csv(here("data", "2024", "NYT-MTA2024.csv"))
+subway <- read_csv(here("data", "2024", "NYT-subway2024.csv"))
+train <- read_csv(here("data", "2024", "NYT-train2024.csv"))
+transit <- read_csv(here("data", "2024", "NYT-transit2024.csv"))
+transport <- read_csv(here("data", "2024", "NYT-transportation2024.csv"))
+```
+
+```{r}
+# save as one df
+nyt_2024 <- rbind(bus, lirr, mta, subway, train, transit, transport)
+
+# remove completely identical rows
+nyt_2024 <- nyt_2024 %>% distinct()
+
+# create corpus for 2024
+corpus_2024 <- corpus(nyt_2024, text_field = "snippet")
+```
+
+### 2025
+
+```{r}
+# same loop as for 2020
+for (i in 1:length(term)){
+  results = nytAPI(term1 = term[i], begin_date = "20250101", end_date = "20251231", api = API_KEY)
+  write.csv(results, paste0("NYT-", term[i],"2025.csv"))
+  Sys.sleep(0.5)
+}
+```
+
+```{r}
+#| message: false
+# read in data
+bus <- read_csv(here("data", "2025", "NYT-bus2025.csv"))
+lirr <- read_csv(here("data", "2025", "NYT-LIRR2025.csv"))
+mta <- read_csv(here("data", "2025", "NYT-MTA2025.csv"))
+subway <- read_csv(here("data", "2025", "NYT-subway2025.csv"))
+train <- read_csv(here("data", "2025", "NYT-train2025.csv"))
+transit <- read_csv(here("data", "2025", "NYT-transit2025.csv"))
+transport <- read_csv(here("data", "2025", "NYT-transportation2025.csv"))
+```
+
+```{r}
+# save as one df
+nyt_2025 <- rbind(bus, lirr, mta, subway, train, transit, transport)
+
+# remove completely identical rows
+nyt_2025 <- nyt_2025 %>% distinct()
+
+# create corpus for 2025
+corpus_2025 <- corpus(nyt_2025, text_field = "snippet")
+```
+
+
+### 2026
+
+```{r}
+# same loop as for 
+for (i in 1:length(term)){
+  results = nytAPI(term1 = term[i], begin_date = "20260101", end_date = "20260525", api = API_KEY)
+  write.csv(results, paste0("NYT-", term[i],"2026.csv"))
+  Sys.sleep(0.5)
+}
+```
+
+```{r}
+#| message: false
+# read in data
+bus <- read_csv(here("data", "2026", "NYT-bus2026.csv"))
+lirr <- read_csv(here("data", "2026", "NYT-LIRR2026.csv"))
+mta <- read_csv(here("data", "2026", "NYT-MTA2026.csv"))
+subway <- read_csv(here("data", "2026", "NYT-subway2026.csv"))
+train <- read_csv(here("data", "2026", "NYT-train2026.csv"))
+transit <- read_csv(here("data", "2026", "NYT-transit2026.csv"))
+transport <- read_csv(here("data", "2026", "NYT-transportation2026.csv"))
+```
+
+```{r}
+# save as one df
+nyt_2026 <- rbind(bus, lirr, mta, subway, train, transit, transport)
+
+# remove completely identical rows
+nyt_2026 <- nyt_2026 %>% distinct()
+
+# create corpus for 2026
+corpus_2026 <- corpus(nyt_2026, text_field = "snippet")
+```
+
+
+## Tokenize and Clean
+
+```{r}
+# create stop word list
+add_stops <- c(quanteda::stopwords("en", source = "smart"), 
+               "said", "says", "told", "according", # remove common low value, high freq words in news articles
+               term, # terms used to search in NYT API
+               "new", "york", "yorker", "city", "long", "island") # NYC-specific terms
+
+
+for (y in c("2020", "2021", "2022", "2023", "2024", "2025", "2026")) {
+  corp <- get(paste0("corpus_", y))
+  
+  tok <- tokens(corp, remove_punct = TRUE, remove_numbers = TRUE) |>
+    tokens_tolower() |>
+    tokens_select(pattern = add_stops, selection = "remove") |>
+    tokens_select(pattern = "$", selection = "remove")
+  
+  d <- dfm_trim(dfm(tok), min_docfreq = 2)
+  assign(paste0("dfm_", y), d[slam::row_sums(d) > 0, ])
+}
+```
+
+## Modeling, by Year
+
+### 2020
+
+```{r}
+tic()
+
+# Fit models for a range of k values
+k_values <- seq(2, 15, by = 1)
+
+coherence_results <- map_dfr(k_values, function(k){
+  m <- LDA(dfm_2020, # give it our matrix
+           k = k,
+           method = "Gibbs", # default
+           control = list(iter = 300,
+                          verbose = 0, # at which interval it announces iterations
+                          seed = 321))
+  
+  # calculate model coherence for each value of k
+  coh <- mean(topic_coherence(m, dfm_2020)) 
+  tibble(k = k,
+         coherence = coh)
+})
+
+toc()
+```
+
+```{r}
+# Plot coherence vs k — look for the peak or elbow
+ggplot(coherence_results, aes(x = k, y = coherence)) +
+  geom_line(color = "navy") +
+  geom_point(color = "navy", size = 2) +
+  geom_vline(xintercept = coherence_results$k[which.max(coherence_results$coherence)],
+             linetype = "dashed", color = "red") +
+  labs(title = "Mean topic coherence by number of topics (k)",
+       subtitle = "Dashed line = k with highest coherence",
+       x = "Number of topics (k)",
+       y = "Mean coherence score") +
+  theme_minimal()
+```
+
+```{r}
+topicModel_k_select <- LDA(dfm_2020, 9,
+                           method = "Gibbs",
+                           control = list(iter = 1000,
+                                          verbose = 0,
+                                          seed = 321))
+```
+
+```{r}
+tmResult <- posterior(topicModel_k_select)
+terms(topicModel_k_select, 10)
+```
+
+### 2021
+
+```{r}
+tok_2025 <- tokens(corpus_2025, remove_punct = TRUE, remove_numbers = TRUE) |>
+    tokens_tolower() |>
+    tokens_select(pattern = add_stops, selection = "remove") |>
+    tokens_select(pattern = "$", selection = "remove")
+  
+  d <- dfm_trim(dfm(tok_2025), min_docfreq = 2)
+  dfm_2025 <- d[slam::row_sums(d) > 0, ]
+
+```
+
+```{r}
+tic()
+
+# Fit models for a range of k values
+k_values <- seq(2, 15, by = 1)
+
+coherence_results <- map_dfr(k_values, function(k){
+  m <- LDA(dfm_2021, # give it our matrix
+           k = k,
+           method = "Gibbs", # default
+           control = list(iter = 300,
+                          verbose = 0, # at which interval it announces iterations
+                          seed = 321))
+  
+  # calculate model coherence for each value of k
+  coh <- mean(topic_coherence(m, dfm_2021)) 
+  tibble(k = k,
+         coherence = coh)
+})
+
+toc()
+```
+
+```{r}
+# Plot coherence vs k — look for the peak or elbow
+ggplot(coherence_results, aes(x = k, y = coherence)) +
+  geom_line(color = "navy") +
+  geom_point(color = "navy", size = 2) +
+  geom_vline(xintercept = coherence_results$k[which.max(coherence_results$coherence)],
+             linetype = "dashed", color = "red") +
+  labs(title = "Mean topic coherence by number of topics (k)",
+       subtitle = "Dashed line = k with highest coherence",
+       x = "Number of topics (k)",
+       y = "Mean coherence score") +
+  theme_minimal()
+```
+
+```{r}
+topicModel_k_select <- LDA(dfm_2021, 10,
+                           method = "Gibbs",
+                           control = list(iter = 1000,
+                                          verbose = 0,
+                                          seed = 321))
+```
+
+```{r}
+tmResult <- posterior(topicModel_k_select)
+terms(topicModel_k_select, 10)
+```
+
+### 2022
+
+```{r}
+tic()
+
+# Fit models for a range of k values
+k_values <- seq(2, 15, by = 1)
+
+coherence_results <- map_dfr(k_values, function(k){
+  m <- LDA(dfm_2022, # give it our matrix
+           k = k,
+           method = "Gibbs", # default
+           control = list(iter = 300,
+                          verbose = 0, # at which interval it announces iterations
+                          seed = 321))
+  
+  # calculate model coherence for each value of k
+  coh <- mean(topic_coherence(m, dfm_2022)) 
+  tibble(k = k,
+         coherence = coh)
+})
+
+toc()
+```
+
+```{r}
+# Plot coherence vs k — look for the peak or elbow
+ggplot(coherence_results, aes(x = k, y = coherence)) +
+  geom_line(color = "navy") +
+  geom_point(color = "navy", size = 2) +
+  geom_vline(xintercept = coherence_results$k[which.max(coherence_results$coherence)],
+             linetype = "dashed", color = "red") +
+  labs(title = "Mean topic coherence by number of topics (k)",
+       subtitle = "Dashed line = k with highest coherence",
+       x = "Number of topics (k)",
+       y = "Mean coherence score") +
+  theme_minimal()
+```
+
+```{r}
+topicModel_k_select <- LDA(dfm_2022, 9,
+                           method = "Gibbs",
+                           control = list(iter = 1000,
+                                          verbose = 0,
+                                          seed = 321))
+```
+
+```{r}
+tmResult <- posterior(topicModel_k_select)
+terms(topicModel_k_select, 10)
+```
+
+### 2023
+
+```{r}
+tic()
+
+# Fit models for a range of k values
+k_values <- seq(2, 15, by = 1)
+
+coherence_results <- map_dfr(k_values, function(k){
+  m <- LDA(dfm_2023, # give it our matrix
+           k = k,
+           method = "Gibbs", # default
+           control = list(iter = 300,
+                          verbose = 0, # at which interval it announces iterations
+                          seed = 321))
+  
+  # calculate model coherence for each value of k
+  coh <- mean(topic_coherence(m, dfm_2023)) 
+  tibble(k = k,
+         coherence = coh)
+})
+
+toc()
+```
+
+```{r}
+# Plot coherence vs k — look for the peak or elbow
+ggplot(coherence_results, aes(x = k, y = coherence)) +
+  geom_line(color = "navy") +
+  geom_point(color = "navy", size = 2) +
+  geom_vline(xintercept = coherence_results$k[which.max(coherence_results$coherence)],
+             linetype = "dashed", color = "red") +
+  labs(title = "Mean topic coherence by number of topics (k)",
+       subtitle = "Dashed line = k with highest coherence",
+       x = "Number of topics (k)",
+       y = "Mean coherence score") +
+  theme_minimal()
+```
+
+```{r}
+topicModel_k_select <- LDA(dfm_2023, 9,
+                           method = "Gibbs",
+                           control = list(iter = 1000,
+                                          verbose = 0,
+                                          seed = 321))
+```
+
+```{r}
+tmResult <- posterior(topicModel_k_select)
+terms(topicModel_k_select, 5)
+```
+
+### 2024
+
+```{r}
+tic()
+
+# Fit models for a range of k values
+k_values <- seq(2, 15, by = 1)
+
+coherence_results <- map_dfr(k_values, function(k){
+  m <- LDA(dfm_2024, # give it our matrix
+           k = k,
+           method = "Gibbs", # default
+           control = list(iter = 300,
+                          verbose = 0, # at which interval it announces iterations
+                          seed = 321))
+  
+  # calculate model coherence for each value of k
+  coh <- mean(topic_coherence(m, dfm_2024)) 
+  tibble(k = k,
+         coherence = coh)
+})
+
+toc()
+```
+
+```{r}
+# Plot coherence vs k — look for the peak or elbow
+ggplot(coherence_results, aes(x = k, y = coherence)) +
+  geom_line(color = "navy") +
+  geom_point(color = "navy", size = 2) +
+  geom_vline(xintercept = coherence_results$k[which.max(coherence_results$coherence)],
+             linetype = "dashed", color = "red") +
+  labs(title = "Mean topic coherence by number of topics (k)",
+       subtitle = "Dashed line = k with highest coherence",
+       x = "Number of topics (k)",
+       y = "Mean coherence score") +
+  theme_minimal()
+```
+
+```{r}
+topicModel_k_select <- LDA(dfm_2024, 9,
+                           method = "Gibbs",
+                           control = list(iter = 1000,
+                                          verbose = 0,
+                                          seed = 321))
+```
+
+```{r}
+tmResult <- posterior(topicModel_k_select)
+terms(topicModel_k_select, 10)
+```
+
+### 2025
+
+```{r}
+tic()
+
+# Fit models for a range of k values
+k_values <- seq(2, 15, by = 1)
+
+coherence_results <- map_dfr(k_values, function(k){
+  m <- LDA(dfm_2025, # give it our matrix
+           k = k,
+           method = "Gibbs", # default
+           control = list(iter = 300,
+                          verbose = 0, # at which interval it announces iterations
+                          seed = 321))
+  
+  # calculate model coherence for each value of k
+  coh <- mean(topic_coherence(m, dfm_2025)) 
+  tibble(k = k,
+         coherence = coh)
+})
+
+toc()
+```
+
+```{r}
+# Plot coherence vs k — look for the peak or elbow
+ggplot(coherence_results, aes(x = k, y = coherence)) +
+  geom_line(color = "navy") +
+  geom_point(color = "navy", size = 2) +
+  geom_vline(xintercept = coherence_results$k[which.max(coherence_results$coherence)],
+             linetype = "dashed", color = "red") +
+  labs(title = "Mean topic coherence by number of topics (k)",
+       subtitle = "Dashed line = k with highest coherence",
+       x = "Number of topics (k)",
+       y = "Mean coherence score") +
+  theme_minimal()
+```
+
+```{r}
+topicModel_k_select <- LDA(dfm_2025, 9,
+                           method = "Gibbs",
+                           control = list(iter = 1000,
+                                          verbose = 0,
+                                          seed = 321))
+```
+
+```{r}
+tmResult <- posterior(topicModel_k_select)
+terms(topicModel_k_select, 10)
+```
+
+### 2026
+
+```{r}
+tic()
+
+# Fit models for a range of k values
+k_values <- seq(2, 15, by = 1)
+
+coherence_results <- map_dfr(k_values, function(k){
+  m <- LDA(dfm_2026, # give it our matrix
+           k = k,
+           method = "Gibbs", # default
+           control = list(iter = 300,
+                          verbose = 0, # at which interval it announces iterations
+                          seed = 321))
+  
+  # calculate model coherence for each value of k
+  coh <- mean(topic_coherence(m, dfm_2026)) 
+  tibble(k = k,
+         coherence = coh)
+})
+
+toc()
+```
+
+```{r}
+# Plot coherence vs k — look for the peak or elbow
+ggplot(coherence_results, aes(x = k, y = coherence)) +
+  geom_line(color = "navy") +
+  geom_point(color = "navy", size = 2) +
+  geom_vline(xintercept = coherence_results$k[which.max(coherence_results$coherence)],
+             linetype = "dashed", color = "red") +
+  labs(title = "Mean topic coherence by number of topics (k)",
+       subtitle = "Dashed line = k with highest coherence",
+       x = "Number of topics (k)",
+       y = "Mean coherence score") +
+  theme_minimal()
+```
+
+```{r}
+topicModel_k_select <- LDA(dfm_2026, 3,
+                           method = "Gibbs",
+                           control = list(iter = 1000,
+                                          verbose = 0,
+                                          seed = 321))
+```
+
+```{r}
+tmResult <- posterior(topicModel_k_select)
+terms(topicModel_k_select, 10)
+```
+
+## Conclusion
+
+Overall, the model consistently selected a k of 15 as the optimal value. This was also the maximum value in the range I selected, so it is most likely that the optimal k is greater than 15. Despite what was deemed optimal by the model (which would have been 15 every time), I selected values of k that were less than 10 but still showed a peak in the graph. I did so in order to improve interpretation of each of the years -- I felt as though it would have been easier to find patterns in 9 topics rather than 15, across years. Regardless, for a repeat of this analysis, I would suggest selecting a range of k values that has a maximum of greater than 15.
+
+In terms of answering the initial question: transportation reporting primarily follows the news cycles. The patterns I saw here was a transition from the pandemic, to subway/transprotation violence, to ____, with concerns of budgets across all years.
