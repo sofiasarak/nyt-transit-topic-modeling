@@ -16,7 +16,7 @@ This analysis follows the following steps:
 
 -   Step 3: Model by year
 
-And closes with a brief conclusion.
+And closes with a brief conclusion. Many of this functions and plots from this analysis were adapted from [Mateo Robins](https://bren.ucsb.edu/people/mateo-robbins) and his course materials.
 
 ## Step 1: Setup and data retrieval
 
@@ -39,11 +39,12 @@ library(LDAvis)
 library(tsne)
 library(servr)
 library(here)
+library(patchwork)
 ```
 
 ```{r API-key, include=FALSE}
 #assign API key.  When you create a NYT Dev account, you will be given a key
-API_KEY <- "58yNxI94EKPuxLecuLRQOG0ho5mHc9lQ2G9Xod7AA7nirYmp"
+API_KEY <- "ENTER_KEY"
 ```
 
 For more information the New York Times API, see: <https://developer.nytimes.com/>
@@ -107,6 +108,8 @@ term <- c("subway", "train", "bus", "MTA", "LIRR", "transportation", "transit")
 ```
 
 ### 2020
+
+To download data for all years, uncomment this and subsequent code chunks.
 
 ```{r}
 # use for loop and query function to retrieve transportation articles from 2020
@@ -217,12 +220,12 @@ corpus_2022 <- corpus(nyt_2022, text_field = "snippet")
 ### 2023
 
 ```{r}
-# same for loop as for 2020
-for (i in 1:length(term)){
-  results = nytAPI(term1 = term[i], begin_date = "20230101", end_date = "20231231", api = API_KEY)
-  write.csv(results, paste0("NYT-", term[i],"2023.csv"))
-  Sys.sleep(0.5)
-}
+# # same for loop as for 2020
+# for (i in 1:length(term)){
+#   results = nytAPI(term1 = term[i], begin_date = "20230101", end_date = "20231231", api = API_KEY)
+#   write.csv(results, paste0("NYT-", term[i],"2023.csv"))
+#   Sys.sleep(0.5)
+# }
 ```
 
 ```{r}
@@ -252,12 +255,12 @@ corpus_2023 <- corpus(nyt_2023, text_field = "snippet")
 ### 2024
 
 ```{r}
-# same for loop as for 2020
-for (i in 1:length(term)){
-  results = nytAPI(term1 = term[i], begin_date = "20240101", end_date = "20241231", api = API_KEY)
-  write.csv(results, paste0("NYT-", term[i],"2024.csv"))
-  Sys.sleep(0.5)
-}
+# # same for loop as for 2020
+# for (i in 1:length(term)){
+#   results = nytAPI(term1 = term[i], begin_date = "20240101", end_date = "20241231", api = API_KEY)
+#   write.csv(results, paste0("NYT-", term[i],"2024.csv"))
+#   Sys.sleep(0.5)
+# }
 ```
 
 ```{r}
@@ -286,12 +289,12 @@ corpus_2024 <- corpus(nyt_2024, text_field = "snippet")
 ### 2025
 
 ```{r}
-# same loop as for 2020
-for (i in 1:length(term)){
-  results = nytAPI(term1 = term[i], begin_date = "20250101", end_date = "20251231", api = API_KEY)
-  write.csv(results, paste0("NYT-", term[i],"2025.csv"))
-  Sys.sleep(0.5)
-}
+# # same loop as for 2020
+# for (i in 1:length(term)){
+#   results = nytAPI(term1 = term[i], begin_date = "20250101", end_date = "20251231", api = API_KEY)
+#   write.csv(results, paste0("NYT-", term[i],"2025.csv"))
+#   Sys.sleep(0.5)
+# }
 ```
 
 ```{r}
@@ -321,12 +324,12 @@ corpus_2025 <- corpus(nyt_2025, text_field = "snippet")
 ### 2026
 
 ```{r}
-# same loop as for 
-for (i in 1:length(term)){
-  results = nytAPI(term1 = term[i], begin_date = "20260101", end_date = "20260525", api = API_KEY)
-  write.csv(results, paste0("NYT-", term[i],"2026.csv"))
-  Sys.sleep(0.5)
-}
+# # same loop as for 
+# for (i in 1:length(term)){
+#   results = nytAPI(term1 = term[i], begin_date = "20260101", end_date = "20260525", api = API_KEY)
+#   write.csv(results, paste0("NYT-", term[i],"2026.csv"))
+#   Sys.sleep(0.5)
+# }
 ```
 
 ```{r}
@@ -357,21 +360,39 @@ corpus_2026 <- corpus(nyt_2026, text_field = "snippet")
 
 ```{r}
 # create stop word list
-add_stops <- c(quanteda::stopwords("en", source = "smart"), 
-               "said", "says", "told", "according", # remove common low value, high freq words in news articles
-               term, # terms used to search in NYT API
-               "new", "york", "yorker", "city", "long", "island") # NYC-specific terms
+add_stops <- c(quanteda::stopwords("en", source = "smart"), # regular stop words
+               
+                # common low value, high freq words in news articles
+               "said", "says", "told", "according",
+               
+               # terms used to search in NYT API
+               term, 
+               
+               # NYC-specific terms
+               "new", "york", "yorker", "city", "long", "island") 
 
-
+# iterate through corpuses of each year to clean
 for (y in c("2020", "2021", "2022", "2023", "2024", "2025", "2026")) {
+  
+  # retrieve corpus
   corp <- get(paste0("corpus_", y))
   
+  # tokenize, remove punctuation and numbers
   tok <- tokens(corp, remove_punct = TRUE, remove_numbers = TRUE) |>
+    
+    # make tokens lowercase
     tokens_tolower() |>
+    
+    # remove stop words
     tokens_select(pattern = add_stops, selection = "remove") |>
+    
+    # remove $, which was not caught in remove_punc argument
     tokens_select(pattern = "$", selection = "remove")
   
+  # trip document
   d <- dfm_trim(dfm(tok), min_docfreq = 2)
+  
+  # remove empty rows
   assign(paste0("dfm_", y), d[slam::row_sums(d) > 0, ])
 }
 ```
@@ -418,6 +439,7 @@ ggplot(coherence_results, aes(x = k, y = coherence)) +
 ```
 
 ```{r}
+# run model on selected k --> this process is repeated throughout
 topicModel_k_select <- LDA(dfm_2020, 9,
                            method = "Gibbs",
                            control = list(iter = 1000,
@@ -426,22 +448,42 @@ topicModel_k_select <- LDA(dfm_2020, 9,
 ```
 
 ```{r}
+# save results and view top 10 words in each topic
 tmResult <- posterior(topicModel_k_select)
 terms(topicModel_k_select, 10)
 ```
 
-### 2021
+Create plot of frequency of top 10 words to later compare to 2026.
 
 ```{r}
-tok_2025 <- tokens(corpus_2025, remove_punct = TRUE, remove_numbers = TRUE) |>
-    tokens_tolower() |>
-    tokens_select(pattern = add_stops, selection = "remove") |>
-    tokens_select(pattern = "$", selection = "remove")
-  
-  d <- dfm_trim(dfm(tok_2025), min_docfreq = 2)
-  dfm_2025 <- d[slam::row_sums(d) > 0, ]
+# clean selected topics
+topics <- tidy(topicModel_k_select, matrix = "beta")
 
+# save top terms per topic
+top_terms <- topics |>
+  group_by(topic) |>
+  slice_max(beta, n = 10) |>
+  ungroup() |>
+  arrange(topic, -beta)
+
+# plot and save
+plot_2020 <- top_terms |>
+  mutate(term = reorder_within(term, beta, topic, sep = "")) |>
+  ggplot(aes(term, beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free_y") +
+  scale_x_reordered() +
+  coord_flip() +
+  labs(title = "Top 10 terms per topic: 2020",
+       subtitle = "β = P(term | topic)",
+       x = NULL, y = "β") +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Set1")
 ```
+
+
+### 2021
+
 
 ```{r}
 tic()
@@ -753,8 +795,44 @@ tmResult <- posterior(topicModel_k_select)
 terms(topicModel_k_select, 10)
 ```
 
+```{r}
+topics <- tidy(topicModel_k_select, matrix = "beta")
+
+top_terms <- topics |>
+  group_by(topic) |>
+  slice_max(beta, n = 10) |>
+  ungroup() |>
+  arrange(topic, -beta)
+
+plot_2026 <- top_terms |>
+  mutate(term = reorder_within(term, beta, topic, sep = "")) |>
+  ggplot(aes(term, beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free_y") +
+  scale_x_reordered() +
+  coord_flip() +
+  labs(title = "Top 10 terms per topic: 2026",
+       subtitle = "β = P(term | topic)",
+       x = NULL, y = "β") +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Set1")
+```
+
+
+## Comparing Top 10 Words
+
+For good measure, we will compare the frequency of top 10 words for topics in 2020 and 2026.
+
+```{r}
+plot_2020 / plot_2026 + plot_layout(heights = c(3, 1))
+
+# save image for better formatting 
+# ggsave("word_frequency.png", height = 9)
+```
+
+
 ## Conclusion
 
 Overall, the model consistently selected a k of 15 as the optimal value. This was also the maximum value in the range I selected, so it is most likely that the optimal k is greater than 15. Despite what was deemed optimal by the model (which would have been 15 every time), I selected values of k that were less than 10 but still showed a peak in the graph. I did so in order to improve interpretation of each of the years -- I felt as though it would have been easier to find patterns in 9 topics rather than 15, across years. Regardless, for a repeat of this analysis, I would suggest selecting a range of k values that has a maximum of greater than 15.
 
-In terms of answering the initial question: transportation reporting primarily follows the news cycles. The patterns I saw here was a transition from the pandemic, to subway/transprotation violence, to ____, with concerns of budgets across all years.
+In terms of answering the initial question: transportation reporting primarily follows the news cycles. The patterns I saw here was a transition from the pandemic, to subway/transportation violence, to Zohran Mamdani and the mayoral race, with concerns of budgets across all years. No climate concerns cropped up in any of the year's topics.
